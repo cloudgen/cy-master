@@ -909,7 +909,7 @@ class AppBase(object):
                         cmd = "sudo adduser -D -G %s %s" % (group_id, username)
                     else:
                         cmd = "adduser -D -G %s %s" % (group_id, username)
-                elif self.is_debian() or self.osVersion().startswith('CentOS') or self.osVersion().startswith('Amazon Linux'):
+                elif self.is_debian() or self.osVersion().startswith('CentOS') or self.is_fedora():
                     if self.is_sudo():
                         cmd = "sudo useradd -g %d -u %d -m -s /bin/bash %s" % (group_id, user_id, username)
                     else:
@@ -920,7 +920,7 @@ class AppBase(object):
                         cmd = "sudo adduser -D -G %s -h %s %s" % (username, home, username)
                     else:
                         cmd = "adduser -D -G %s -h %s %s" % (username, home, username)
-                elif self.is_debian() or self.osVersion().startswith('CentOS') or self.osVersion().startswith('Amazon Linux'):
+                elif self.is_debian() or self.osVersion().startswith('CentOS') or self.is_fedora():
                     if self.is_sudo():
                         cmd = "sudo useradd -g %d -u %d -m -d %s -s /bin/bash %s" % (group_id, user_id, home, username)
                     else:
@@ -1529,7 +1529,7 @@ class AppBase(object):
                     cmd = "sudo addgroup -g %d %s" % (group_id, groupname)
                 else:
                     cmd = "addgroup -g %d %s" % (group_id, groupname)
-            elif self.is_debian() or self.osVersion().startswith('CentOS') or self.osVersion().startswith('Amazon Linux'):
+            elif self.is_debian() or self.osVersion().startswith('CentOS') or self.is_fedora():
                 if self.is_sudo():
                     cmd = "sudo groupadd -g %d %s" % (group_id, groupname)
                 else:
@@ -1565,7 +1565,7 @@ class AppBase(object):
         return "# modified to add ~/.local/bin to PATH" in contents
 
     def is_debian(self):
-        return self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian') or self.osVersion().startswith('Raspbian')
+        return self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian') or self.osVersion().startswith('Raspbian') or self.is_mint() or self.is_kali()
 
     def is_docker_container(self):
         if not hasattr(self, '__is_container__'):
@@ -1573,13 +1573,22 @@ class AppBase(object):
         return self.__is_container__
 
     def is_fedora(self):
-        return self.osVersion().startswith('Amazon') or self.osVersion().startswith('Fedora')
+        return self.osVersion().startswith('Amazon Linux') or self.osVersion().startswith('Fedora')
+
+    def is_kali(self):
+        return self.osVersion().startswith('Kali')
 
     def is_linux(self):
-        return not (self.osVersion()=='windows' or self.osVersion()=='macOS' or self.osVersion().startswith('macOS'))
+        return not (self.osVersion()=='windows' or self.osVersion()=='macOS' or self.osVersion().startswith('macOS')) 
 
     def is_mac(self):
         return self.osVersion()=='macOS'
+
+    def is_mint(self):
+        return self.osVersion().startswith('Linux Mint')
+
+    def is_mint(self):
+        return self.osVersion().startswith('Linux Mint')
 
     def is_ubuntu(self):
         return self.osVersion().startswith('Ubuntu')
@@ -3531,27 +3540,32 @@ class CyMaster(AppBase):
         self.chdir(self.projectPath())
         dir = '%s/%s' % (self.projectPath(), self.srcFolder())
         setup_py = '%s/setup.py' % (dir)
-        if not self.pathexists(setup_py):
-            self.cmd_history(f"# ** Prepare the cython setup file: {setup_py} **")
-            self.mkdir(dir)
-            targetName=self.targetName()
-            lines=['from setuptools import setup',
-                'from Cython.Build import cythonize',
-                'setup(',
-                '  ext_modules=cythonize("%s/%s.pyx",compiler_directives={"language_level" : "%d"})' % (self.srcFolder(), targetName, version),
-                ')',
-                ''
-            ]
-            file = self.open(setup_py,'w')
-            file.write('\n'.join(lines))
-            file.close()
-            self.chmod_x(setup_py)
+        self.cmd_history(f"# ** Check and prepare the cython setup file: {setup_py} **")
+        if self.pathexists(setup_py):
+            self.removeFile(setup_py)
+        self.mkdir(dir)
+        targetName=self.targetName()
+        lines=['#!/usr/bin/env python',
+            'from setuptools import setup',
+            'from Cython.Build import cythonize',
+            'setup(',
+            '  ext_modules=cythonize("%s/%s.pyx",compiler_directives={"language_level" : "%d"})' % (self.srcFolder(), targetName, version),
+            ')',
+            ''
+        ]
+        file = self.open(setup_py,'w')
+        file.write('\n'.join(lines))
+        file.close()
+        self.chmod_x(setup_py)
 
-    def cy3_build_lib(self):
-        src_dir = '%s/%s' % (self.projectPath(), self.srcDir())
+    def cy_build_lib(self):
+        self.cmd_history("# ** Compile into .so file! **", currentframe().f_lineno)
+        src_dir = '%s/%s' % (self.projectPath(), self.srcFolder())
         dir = '%s/%s/lib' % (self.projectPath(), self.buildFolder())
         self.mkdir(dir)
-        self.shell(['python3', f'{src_dir}/setup.py', 'build_ext', '--inplace'])
+        cmd= [ f'{src_dir}/setup.py', 'build_ext', '--inplace']
+        self.cmd_history(' '.join(cmd))
+        self.shell(' '.join(cmd))
 
     def ask_ini(self):
         # fromPipe() usually involve from curl and don't have stdin
@@ -3747,14 +3761,7 @@ class CyMaster(AppBase):
                 file = self.open(init_file,'w')
                 file.write('\n')
                 file.close()
-            self.cmd_history("# ** Compile into .so file! **", currentframe().f_lineno)
-            if version==3:
-                py = self.which_cmd("python3")
-            else:
-                py = self.which_cmd("python2")
-            cmd=f"{py} {self.srcFolder()}/setup.py build_ext --inplace"
-            self.cmd_history(cmd)
-            self.shell(cmd)
+            self.cy_build_lib()
             self.cmd_history("# ** Move all the generated .so file to build/lib **", currentframe().f_lineno)  
             cmd="mv *.so build/lib/"
             self.shell(cmd)
@@ -3900,5 +3907,5 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-11',majorVersion=1,minorVersion=11)
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-12',majorVersion=1,minorVersion=12)
     app.start()
