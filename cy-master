@@ -63,7 +63,7 @@ import time
 import sys
 
 class AppBase(object):
-    VERSION="1.2"
+    VERSION="1.3"
     BOLD='\033[1m'
     DARK_AMBER='\033[33m'
     DARK_BLUE='\033[34m'
@@ -564,7 +564,9 @@ class AppBase(object):
             return self.__python3__
 
     def check_python(self):
-        self.cmd_history("# ** Checking python version  **",currentframe().f_lineno)
+        if not hasattr(self, '__python_checked__'):
+            self.__python_checked__=True
+            self.cmd_history("# ** Checking python version  **",currentframe().f_lineno)
         python2 = self.which_cmd("python2")
         python3 = self.which_cmd("python3")
         arch = 'x86_64'
@@ -583,9 +585,18 @@ class AppBase(object):
                             python2 = python
                         elif int(version) == 3 and python3=='':
                             python3 = python
-                        self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-{arch}-linux-gnu"
+                        if self.is_mac():
+                            self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-darwin"
+                        else:
+                            self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-{arch}-linux-gnu"
         self.__python2__ = python2
         self.__python3__ = python3
+        if python2!="" and not hasattr(self, '__python2_found__'):
+            self.__python2_found__ = True
+            self.cmd_history(f"  # python2 found: {self.python2()}")
+        if python3!="" and  not hasattr(self, '__python3_found__'):
+            self.__python3_found__ = True
+            self.cmd_history(f"  # python3 found: {self.python3()}")
         if not hasattr(self,"__cython_version__"):
             self.__cython_version__=""
             if self.__python3__ != "":
@@ -594,7 +605,10 @@ class AppBase(object):
                     id_array = stdout.strip().split(' ')
                     if len(id_array) > 1:
                         version_array = id_array[1].split(".")
-                        self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-{arch}-linux-gnu"
+                        if self.is_mac():
+                            self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-darwin"
+                        else:
+                            self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-{arch}-linux-gnu"
         self.__python_checked__ = True
 
     def cmd_history(self,cmd=None, line=None):
@@ -1136,6 +1150,22 @@ class AppBase(object):
             self.history_cd(path, line_num)
             os.chdir(path)
 
+    def download_get_install_pip(self):
+        fname = self.tempFile('get-pip')
+        self.download_to_temp("https://bootstrap.pypa.io/get-pip.py", file=fname, verbal=False)
+        if self.is_mac():
+            cmd=f"{self.executable()} {fname}"
+        elif self.root_or_sudo():
+            if self.username()=='root':
+                cmd=f"{self.executable()} {fname}"
+            else:
+                cmd=f"sudo {self.executable()} {fname}"
+        else:
+            cmd=f"{self.executable()} {fname}"
+        self.cmd_history("# ** install pip by get-pip.py **")
+        self.cmd_history(cmd)
+        self.shell(cmd)
+
     def download_and_install_target(self):
         tempFolder = self.tempFolder()
         if self.targetApp() == '' or tempFolder=="":
@@ -1315,9 +1345,13 @@ class AppBase(object):
         else:
             return self.__install_local__(self.thisFile(), verbal)
 
+    def install_musl_dev(self):
+        if self.is_alpine():
+            return self.install_package('musl-dev',['/usr/include/stdio.h'])
+
     def install_package(self, package=None, path=None):
         # root_or_sudo() Check user is root or has sudo privilege and assuming linux
-        if not self.root_or_sudo():
+        if not (self.is_mac() or self.root_or_sudo()):
             return False
         installed = False
         if path is not None and package is not None:
@@ -1392,7 +1426,6 @@ class AppBase(object):
 
     def install_python_dev(self):
         if self.python2() != '':
-            self.cmd_history("  # python2 found! ")
             if self.is_alpine():
                 self.install_package('python2-dev')
             elif self.is_debian():
@@ -1406,7 +1439,6 @@ class AppBase(object):
             else:
                 self.install_package('python-devel')
         if self.python3() != '':
-            self.cmd_history("  # python3 found")
             if self.is_alpine():
                 self.install_package('python3-dev')
             elif self.is_debian():
@@ -1423,11 +1455,11 @@ class AppBase(object):
             self.cmd_history("  # Both python2 and python3 not found! ")
 
 
-    def install_python_package(self, package=None):
-        self.history_install_package('jupyter', currentframe().f_lineno)
+    def install_python_package(self, package):
+        self.history_install_package(package, currentframe().f_lineno)
         if self.is_ubuntu() and self.os_major_version()>22:
             cmd = 'pip3 install --upgrade --break-system-packages %s' % package
-        elif self.osVersion().startswith('Debian') and self.os_major_version()>11:
+        elif self.osVersion().startswith('Debian') and self.os_major_version()>14271:
             cmd = 'pip3 install --upgrade --break-system-packages %s' % package
         else:
             cmd = 'pip3 install --upgrade %s' % package
@@ -1445,14 +1477,19 @@ class AppBase(object):
             return self.path_to_dos(which) == self.path_to_dos(self.localInstallPath())
         return which == self.localInstallPath()
 
+    def install_gcc(self):
+        if self.is_mac() and not self.pathexists('/usr/bin/gcc'):
+            self.infoMsg("Please see details in installation of XCode command line tools at: https://mac.install.guide/commandlinetools/","Package needed")
+            return False
+        else:
+            result = self.install_package('gcc', ['/usr/bin/gcc'])
+
     def install_jupyter(self):
-        result = self.install_package('gcc', ['/usr/bin/gcc'])
+        result = self.install_gcc()
         result = self.install_package('python3-dev',['/usr/include/python3.8/Python.h','/usr/include/python3.9/Python.h','/usr/include/python3.10/Python.h','/usr/include/python3.11/Python.h','/usr/include/python3.12/Python.h'])
         if self.is_alpine():
             result = self.install_package('musl-dev',['/usr/include/stdio.h'])
-            result = self.install_package('py3-pip', ['/usr/bin/pip3'])
-        else:
-            result = self.install_package('python3-pip', ['/usr/bin/pip3'])
+        result = self.install_pip()
         if result:
             self.install_python_package('jupyter')
             self.install_python_package('jupyterhub')
@@ -1487,6 +1524,16 @@ class AppBase(object):
                 result = self.add_nginx_adm_sudoer()
             return result
         return True
+
+    def install_pip(self):
+        if self.is_alpine():
+            result = self.install_package('py3-pip', ['/usr/bin/pip3'])
+        elif self.is_mac():
+            self.download_get_install_pip()
+            return True
+        else:
+            result = self.install_package('python3-pip', ['/usr/bin/pip3','/usr/local/bin/pip3'])
+        return result
 
     def install_target_global(self, this, useSudo=False):
         if self.targetApp() != '':
@@ -2616,17 +2663,19 @@ class AppBase(object):
             fname="%s/%s" % (tempFolder, self.targetApp())
         return fname
 
-    def tempFile(self):
+    def tempFile(self, appName=None):
+        if appName is None:
+            appName = self.appName()
         tempFolder=self.tempFolder()
         if tempFolder=="":
             return ""
         if self.isCmd():
-            fname="%s\\%s-%s.bat" % (tempFolder, self.appName(),self.timestamp())
+            fname="%s\\%s-%s.bat" % (tempFolder, appName,self.timestamp())
         elif self.isGitBash():
             # GitBash download location should remain the same such that starting with /c/Users/user...
-            fname="%s/%s-%s.bat" % (tempFolder, self.appName(),self.timestamp())
+            fname="%s/%s-%s.bat" % (tempFolder, appName,self.timestamp())
         else:
-            fname="%s/%s-%s" % (tempFolder, self.appName(),self.timestamp())
+            fname="%s/%s-%s" % (tempFolder, appName,self.timestamp())
         return fname
 
     def tempFolder(self):
@@ -2894,10 +2943,9 @@ class AppBase(object):
         if self.is_alpine():
             result = self.uninstall_package('musl-dev',['/usr/include/stdio.h'])
             result = self.uninstall_package('linux-headers',['/usr/include/linux/version.h'])
-            result = self.uninstall_package('py3-pip', ['/usr/bin/pip3'])
         else:
             result = self.uninstall_package('libc6-dev',['/usr/include/stdio.h'])
-            result = self.uninstall_package('python3-pip', ['/usr/bin/pip3'])
+        self.install_pip()
         result = self.uninstall_nginx()
         self.remove_nginx_adm_sudoer()
         self.remove_user('nginx-adm')
@@ -3916,13 +3964,9 @@ class CyMaster(AppBase):
         return True
 
     def requisite(self):
-        if self.is_alpine():
-            result = self.install_package('musl-dev',['/usr/include/stdio.h'])
-            result = self.install_package('gcc', ['/usr/bin/gcc'])
-            result = self.install_package('py3-pip', ['/usr/bin/pip3'])
-        else:
-            result = self.install_package('gcc', ['/usr/bin/gcc'])
-            result = self.install_package('python3-pip', ['/usr/bin/pip3'])
+        result = self.install_musl_dev()
+        result = self.install_gcc()
+        result = self.install_pip()
         if result:
             cython = self.which_cmd('cython')
             if cython == '':
@@ -3938,5 +3982,5 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-11',majorVersion=1,minorVersion=11)
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-15',majorVersion=1,minorVersion=15)
     app.start()
