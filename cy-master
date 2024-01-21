@@ -63,7 +63,7 @@ import time
 import sys
 
 class AppBase(object):
-    VERSION="1.3"
+    VERSION="1.5"
     BOLD='\033[1m'
     DARK_AMBER='\033[33m'
     DARK_BLUE='\033[34m'
@@ -611,7 +611,7 @@ class AppBase(object):
                             self.__cython_version__=f"cpython-{version_array[0]}{version_array[1]}-{arch}-linux-gnu"
         self.__python_checked__ = True
 
-    def cmd_history(self,cmd=None, line=None):
+    def cmd_history(self,command=None, line=None):
         if not hasattr(self, '__reg_end_stars__'):
             self.__reg_end_stars__ = re.compile(r"[\*]+\s*$")
         if hasattr(self, "__tick__"):
@@ -624,9 +624,15 @@ class AppBase(object):
             self.__cmd_history_id__=1
         if not hasattr(self,'__cmd_history__'):
             self.__cmd_history__=["# ====== Command History starting at %s: ======" % self.__tick__]
-        if cmd is None:
+        if command is None:
             return self.__cmd_history__
         else:
+            if isinstance(command, basestring):
+                cmd = command
+            elif isinstance(command, list):
+                cmd = " ".join(cmd)
+            else:
+                cmd = ""
             if cmd.startswith("# **"):
                 if line is not None:
                     line_at = "--line %d--" % line
@@ -637,7 +643,7 @@ class AppBase(object):
                     self.__cmd_history__.append("  #    ...( %.3f second )" % self.__diff_time__)
                 self.__cmd_history__.append("# ** %d. %s %s **" % (self.__cmd_history_id__, cmd[5:], line_at))
                 self.__cmd_history_id__ = self.__cmd_history_id__ + 1
-            else:
+            elif cmd != "":
                 self.__cmd_history__.append("  %s" % cmd)
         return self
 
@@ -765,10 +771,18 @@ class AppBase(object):
     def check_system(self):
         if self.pythonVersion().split(".")[0] =="3":
             self.pythonName( "python3" )
-            major = 3
+            self.pythonMajor(3)
+            try:
+                self.pythonMinor(int(self.pythonVersion().split(".")[1]))
+            except:
+                self.pythonMinor(0)
         else:
             self.pythonName( "python2" )
-            major = 2
+            self.pythonMajor(2)
+            try:
+                self.pythonMinor(int(self.pythonVersion().split(".")[1]))
+            except:
+                self.pythonMinor(0)
         minor = int(self.pythonVersion().split(".")[0])
         gcc = sys.version
         self.arch()
@@ -1307,6 +1321,12 @@ class AppBase(object):
             self.msg_global_already()
             return False
 
+    def install_containerd(self):
+        return self.install_package('containerd', ['/usr/bin/containerd'])
+
+    def install_docker_io(self):
+        return self.install_package('docker.io', ['/usr/bin/docker'])
+
     def install_libcrypto(self):
         if self.osVersion().startswith('Alpine'):
             result = self.install_package('libcrypto1.1', ['/usr/lib/libcrypto.so'])
@@ -1339,6 +1359,11 @@ class AppBase(object):
         result = self.install_package('sqlite3', ['/usr/bin/sqlite3'])
         return result
 
+    def install_linux_headers(self):
+        if self.is_alpine():
+            return self.install_package('linux-headers',['/usr/include/linux/version.h'])
+        return True
+
     def install_local(self, verbal = True):
         if self.thisFile().endswith(".so"):
             return self.__install_local__(self.this(), verbal)
@@ -1348,23 +1373,31 @@ class AppBase(object):
     def install_musl_dev(self):
         if self.is_alpine():
             return self.install_package('musl-dev',['/usr/include/stdio.h'])
+        return True
 
     def install_package(self, package=None, path=None):
-        # root_or_sudo() Check user is root or has sudo privilege and assuming linux
-        if not (self.is_mac() or self.root_or_sudo()):
-            return False
         installed = False
+        self.history_check_exists(package, currentframe().f_lineno)
+        checkPath=False
         if path is not None and package is not None:
-            self.history_check_exists(package, currentframe().f_lineno)
             if isinstance(path,basestring):
                 if self.pathexists(path, use_history=True):
                     self.history_package_exists(package, currentframe().f_lineno)
-                    return True
+                    checkPath= True
+                if self.which_cmd(path):
+                    self.cmd_history(f"ls {self.which_cmd(path)}")
+                    checkPath=True
             elif isinstance(path,list):
                 for l in path:
                     if self.pathexists(l, use_history=True):
                         self.history_package_exists(package, currentframe().f_lineno)
-                        return True
+                        checkPath= True
+                    if self.which_cmd(l):
+                        self.cmd_history(f"ls {self.which_cmd(l)}")
+                        self.history_package_exists(package, currentframe().f_lineno)
+                        checkPath=True
+        if checkPath:
+            return True
         if self.update_repository():
             if self.is_debian():
                 self.history_install_package(package, currentframe().f_lineno)
@@ -1452,7 +1485,7 @@ class AppBase(object):
             else:
                 self.install_package('pytho3-devel')
         if self.python3() == '' and self.python2() == '':
-            self.cmd_history("  # Both python2 and python3 not found! ")
+            self.cmd_history("# Both python2 and python3 not found! ")
 
 
     def install_python_package(self, package):
@@ -1465,6 +1498,9 @@ class AppBase(object):
             cmd = 'pip3 install --upgrade %s' % package
         self.cmd_history(cmd)
         self.shell(cmd,ignoreErr=True)
+
+    def install_runc(self):
+        return self.install_package('runc', ['/usr/bin/runc'])
 
     def installedGlobal(self):
         return self.pathexists(self.globalInstallPath(0)) or self.pathexists(self.globalInstallPath(1)) 
@@ -1486,9 +1522,9 @@ class AppBase(object):
 
     def install_jupyter(self):
         result = self.install_gcc()
-        result = self.install_package('python3-dev',['/usr/include/python3.8/Python.h','/usr/include/python3.9/Python.h','/usr/include/python3.10/Python.h','/usr/include/python3.11/Python.h','/usr/include/python3.12/Python.h'])
-        if self.is_alpine():
-            result = self.install_package('musl-dev',['/usr/include/stdio.h'])
+        result = self.install_python_dev()
+        result = self.install_linux_headers()
+        result = self.install_musl_dev()
         result = self.install_pip()
         if result:
             self.install_python_package('jupyter')
@@ -1526,6 +1562,7 @@ class AppBase(object):
         return True
 
     def install_pip(self):
+        result = True
         if self.is_alpine():
             result = self.install_package('py3-pip', ['/usr/bin/pip3'])
         elif self.is_mac():
@@ -1632,6 +1669,15 @@ class AppBase(object):
 
     def is_fedora(self):
         return self.osVersion().startswith('Amazon Linux') or self.osVersion().startswith('Fedora')
+
+    def is_gnu_tar(self):
+        result = False
+        tar = self.which_cmd("tar")
+        if tar != "":
+            result, stdout = self.shell(f"{tar} --version")
+            if "GNU tar" in stdout:
+                result = True
+        return result
 
     def is_kali(self):
         return self.osVersion().startswith('Kali')
@@ -2163,11 +2209,18 @@ class AppBase(object):
                 if file.endswith(pattern):
                     self.removeFile("%s/%s" % (dirPath,file))
 
-    def removeFolder(self, dirPath):
+    def removeFolder(self, dirPath, use_history=False):
+        if use_history:
+            self.history_remove_folder(dirPath)
         if self.isCmd() or self.isGitBash():
             dirPath=self.path_to_dos(dirPath)
         if self.pathexists(dirPath) and os.path.isdir(dirPath):
+            if use_history:
+                self.cmd_history(f"rm -rf {dirPath}")
             shutil.rmtree(dirPath)
+        else:
+            if use_history:
+                self.cmd_history(f"# folder {dirPath}: not found, cannot be removed.")
 
     def remove_user(self, username=None):
         cmd= "id %s" % username
@@ -2535,7 +2588,10 @@ class AppBase(object):
 
     def start_install(self):
         if hasattr(self,"requisite") and callable(self.requisite):
-            self.requisite()
+            self.infoMsg("System requisite Found!", "REQUESITE")
+            result = self.requisite()
+        else:
+            self.infoMsg("No system requisite Found!", "NO REQUESITE")
         if self.is_local() or self.isGlobal():
             if self.need_update():
                 self.download_and_install()
@@ -2613,7 +2669,7 @@ class AppBase(object):
             tar = self.where_cmd('tar.exe')
         else:
             tar = self.which_cmd('tar')
-        cmd= [tar,"-cvf", "--owner=0","--group=0","--no-same-owner","--no-same-permissions", fname, path]
+        cmd= [tar, "--no-same-owner","--no-same-permissions","-cvf", fname, path]
         self.cmd_history(" ".join(cmd))
         result, stdout = self.shell(cmd,ignoreErr=True,ignoreAll=True)
 
@@ -2721,7 +2777,10 @@ class AppBase(object):
 
     @staticmethod
     def thisFile():
-        return AppBase.__here__
+        if AppBase.__here__ == "":
+            return ""
+        else:
+            return os.path.realpath(AppBase.__here__)
 
     def today(self):
         return date.today()
@@ -2809,6 +2868,10 @@ class AppBase(object):
 
     def which_cmd(self, cmd, default=""):
         stdout = ''
+        if "/" in cmd:
+            cmd= cmd.split("/")[-1]
+        if "\\" in cmd:
+            cmd= cmd.split("\\")[-1]
         if self.isCmd() or self.isGitBash():
             return self.where_cmd(cmd)
         elif self.isLinuxShell():
@@ -2935,14 +2998,17 @@ class AppBase(object):
             return True
         return False
 
+    def unisntall_gcc(self):
+        return self.uninstall_package('gcc', ['/usr/bin/gcc'])
+
     def uninstall_jupyter(self):
         self.uninstall_python_package('jupyter')
         self.uninstall_python_package('jupyterhub')
-        result = self.uninstall_package('gcc', ['/usr/bin/gcc'])
+        result = self.uninstall_gcc()
         result = self.uninstall_package('python3-dev',['/usr/include/python3.8/Python.h','/usr/include/python3.9/Python.h','/usr/include/python3.10/Python.h','/usr/include/python3.11/Python.h','/usr/include/python3.12/Python.h'])
         if self.is_alpine():
-            result = self.uninstall_package('musl-dev',['/usr/include/stdio.h'])
-            result = self.uninstall_package('linux-headers',['/usr/include/linux/version.h'])
+            result = self.uninstall_musl_dev() 
+            result = self.uninstall_linux_headers()
         else:
             result = self.uninstall_package('libc6-dev',['/usr/include/stdio.h'])
         self.install_pip()
@@ -2957,6 +3023,16 @@ class AppBase(object):
         else:
             result = self.uninstall_package('libssl-dev', ['/usr/lib/x86_64-linux-gnu/libcrypto.so'])
         return result
+
+    def uninstall_linux_headers(self):
+        if self.is_alpine():
+            return self.uninstall_package('linux-headers',['/usr/include/linux/version.h'])
+        return True
+
+    def uninstall_musl_dev(self):
+        if self.is_alpine():
+            return self.uninstall_package('musl-dev',['/usr/include/stdio.h'])
+        return True
 
     def uninstall_libinih(self):
         if self.is_alpine():
@@ -3250,6 +3326,9 @@ class AppBase(object):
     def history_check_zsh(self, line_num=None):
         self.cmd_history("# ** Try to check and modify ~/.zshenv **", line_num)
 
+    def history_compress(self, target_file, line_num=None):
+        self.cmd_history("# ** Trying to create compressed file {target_file} for container **", currentframe().f_lineno)
+
     def history_create_soft_link(self, line_num=None):
         self.cmd_history("# ** Try to create soft link **", line_num)
 
@@ -3284,10 +3363,13 @@ class AppBase(object):
         self.cmd_history("# ** Open %s as the location for writing **" % f, line_num)
 
     def history_package_exists(self, package, line_num=None):
-        self.cmd_history("# ** Package: %s exists and no installation for it **" % package, line_num)
+        self.cmd_history("# Package: %s exists and no installation for it **" % package, line_num)
 
     def history_remove_downloaded(self, line_num=None):
         self.cmd_history("# ** Try to remove downloaded file **", line_num)
+
+    def history_remove_folder(self, folder, line_num=None):
+        self.cmd_history(f"# ** Try to remove folder: {folder} **", line_num)
 
     def history_remove_previous_global(self, line_num=None):
         self.cmd_history("# ** Try to remove previous installed global version **", line_num)
@@ -3349,6 +3431,9 @@ class AppBase(object):
 
     def msg_extraction_error(self, file="", title="DOWNLOAD ERROR"):
         self.criticalMsg("File Extraction error: %s not found" % file, title)
+
+    def msg_incompatiable_os(self, title="INSTALL"):
+        self.criticalMsg("Using incompatible OS or not able to use sudo", title)
 
     def msg_installation_failed(self, title="INSTALLATION"):
         self.criticalMsg("Installation failed!", title)
@@ -3614,30 +3699,53 @@ class AppBase(object):
 class CyMaster(AppBase):
 
     def check_setup_py(self, version):
-        self.chdir(self.projectPath())
         dir = '%s/%s' % (self.projectPath(), self.srcFolder())
         setup_py = '%s/setup.py' % (dir)
-        if not self.pathexists(setup_py):
-            self.cmd_history(f"# ** Prepare the cython setup file: {setup_py} **")
-            self.mkdir(dir)
-            targetName=self.targetName()
-            lines=['from setuptools import setup',
-                'from Cython.Build import cythonize',
-                'setup(',
-                '  ext_modules=cythonize("%s/%s.pyx",compiler_directives={"language_level" : "%d"})' % (self.srcFolder(), targetName, version),
-                ')',
-                ''
-            ]
-            file = self.open(setup_py,'w')
-            file.write('\n'.join(lines))
-            file.close()
-            self.chmod_x(setup_py)
+        self.cmd_history(f"# ** Prepare the cython setup file: {setup_py} **")
+        self.cmd_history(f"cd {self.projectPath()}")
+        self.chdir(self.projectPath())
+        if self.pathexists(setup_py):
+            self.removeFile(setup_py)
+        self.mkdir(dir)
+        targetName=self.targetName()
+        firstLine = ""
+        if self.which_cmd('conda')!= '':
+            firstLine = f"#!{sys.executable}"
+        elif version==3:
+            firstLine = f"#!{self.python3()}"
+        elif version==2:
+            firstLine = f"#!{self.python2()}"
+        lines=[firstLine,
+            'from setuptools import setup',
+            'from Cython.Build import cythonize',
+            '',
+            'setup(',
+            '  ext_modules=cythonize("%s/%s.pyx",compiler_directives={"language_level" : "%d"})' % (self.srcFolder(), targetName, version),
+            ')',
+            ''
+        ]
+        file = self.open(setup_py,'w')
+        file.write('\n'.join(lines))
+        file.close()
+        self.chmod_x(setup_py)
 
     def cy3_build_lib(self):
         src_dir = '%s/%s' % (self.projectPath(), self.srcDir())
         dir = '%s/%s/lib' % (self.projectPath(), self.buildFolder())
         self.mkdir(dir)
-        self.shell(['python3', f'{src_dir}/setup.py', 'build_ext', '--inplace'])
+        if self.which_cmd('conda') != "":
+            self.shell([sys.executable, f'{src_dir}/setup.py', 'build_ext', '--inplace'])
+        else:
+            self.shell([self.python3(), f'{src_dir}/setup.py', 'build_ext', '--inplace'])
+
+    def cy2_build_lib(self):
+        src_dir = '%s/%s' % (self.projectPath(), self.srcDir())
+        dir = '%s/%s/lib' % (self.projectPath(), self.buildFolder())
+        self.mkdir(dir)
+        if self.which_cmd('conda') != "":
+            self.shell([sys.executable, f'{src_dir}/setup.py', 'build_ext', '--inplace'])
+        else:
+            self.shell([self.python2(), f'{src_dir}/setup.py', 'build_ext', '--inplace'])
 
     def ask_ini(self):
         # fromPipe() usually involve from curl and don't have stdin
@@ -3675,6 +3783,21 @@ class CyMaster(AppBase):
         self.targetName(targetName)
 
         return True
+
+    def ask_cython_version(self):
+        if self.which_cmd('conda') == "":
+            version = self.ask_choose_python_version()
+            if version is None:
+                exit()
+            version = int(version)
+            while  version<2 or version>3:
+                version = self.ask_choose_python_version()
+                if version is None: 
+                    exit()
+        else:
+            version = int(self.pythonMajor())
+            self.prn(f"  A. Using conda's python{version}!")
+        return version
 
     def ask_choose_python_version(self):
         # fromPipe() usually involve from curl and don't have stdin
@@ -3838,7 +3961,7 @@ class CyMaster(AppBase):
                 py = self.which_cmd("python3")
             else:
                 py = self.which_cmd("python2")
-            cmd=f"{py} {self.srcFolder()}/setup.py build_ext --inplace"
+            cmd=f"{self.srcFolder()}/setup.py build_ext --inplace"
             self.cmd_history(cmd)
             self.shell(cmd)
             self.cmd_history("# ** Move all the generated .so file to build/lib **", currentframe().f_lineno)  
@@ -3899,7 +4022,7 @@ class CyMaster(AppBase):
             self.cmd(sys.argv[1])
             if self.cmd() == 'clean':
                 if self.checkConfig():
-                    self.cmd_history("# ** clean folders **")
+                    self.cmd_history("# ** clean folders **", currentframe().f_lineno)
                     if self.buildFolder != '/':
                         cmd=f"rm -rf {self.buildFolder()}"
                         self.cmd_history(cmd)
@@ -3908,21 +4031,21 @@ class CyMaster(AppBase):
                 return True
             return False
         elif len(sys.argv) == 1:
-            cython=self.which_cmd('cython')
             if self.fromPipe():
                 return False
-            if cython=='':
-                self.infoMsg("This program require cython.\n  You need to install this program and then run the 'self-install' subcommand to setup.", "PACKAGE REQUIRED")
-                return False
+            if hasattr(self,"requisite") and callable(self.requisite):
+                result = self.requisite()
+            if not result:
+                cython=self.which_cmd('cython')
+                if cython=='':
+                    self.infoMsg("This program require cython.\n  You need to install this program by running the 'self-install' subcommand to setup.", "PACKAGE REQUIRED")
+                    return True
+                gcc=self.which_cmd('gcc')
+                if gcc=='':
+                    self.infoMsg("This program require gcc.\n  You need to use sudo install this program.", "PACKAGE REQUIRED")
+                    return True
             if self.checkConfig():
-                version = self.ask_choose_python_version()
-                if version is None:
-                    exit()
-                version = int(version)
-                while  version<2 or version>3:
-                    version = self.ask_choose_python_version()
-                    if version is None: 
-                        exit()
+                version = self.ask_cython_version()
                 mode = self.ask_choose_compile_mode()
                 if mode is None:
                     exit()
@@ -3937,7 +4060,7 @@ class CyMaster(AppBase):
                     self.build_lib(version)
                     projectSrc = '%s/src' % self.projectPath()
                     buildLib = f'{self.projectPath()}/build/lib/'
-                    self.cmd_history(f'# ** Checking output in {buildLib} **')
+                    self.cmd_history(f'# ** Checking output in {buildLib} **', currentframe().f_lineno)
                     self.history_ls(buildLib)
                     targetSo = ''
                     for file in os.listdir(buildLib):
@@ -3947,7 +4070,7 @@ class CyMaster(AppBase):
                         self.cmd_history(f'# {targetSo} found! ')
                         if self.pathexists(projectSrc) and self.srcFolder() != projectSrc:
                             if 'yes' == self.__ask_yesno__('Do you wanted to copy folder "build/lib" to folder "src" (yes/no)? '):
-                                self.cmd_history('# ** Copy build files to source folder **')
+                                self.cmd_history('# ** Copy build files to source folder **',currentframe().f_lineno)
                                 cmd = f'cp -rP {buildLib} {projectSrc}'
                                 self.cmd_history(cmd)
                                 result, stdout = self.shell(cmd)
@@ -3964,14 +4087,20 @@ class CyMaster(AppBase):
         return True
 
     def requisite(self):
-        result = self.install_musl_dev()
-        result = self.install_gcc()
-        result = self.install_pip()
-        if result:
-            cython = self.which_cmd('cython')
-            if cython == '':
-                self.install_python_package('cython')
-        self.install_python_dev()
+        result1 = self.install_musl_dev()
+        result2 = self.install_gcc()
+
+        result3 = self.install_pip()
+        self.history_check_exists("cython", currentframe().f_lineno)
+        cython = self.which_cmd('cython')
+        if cython == '':
+            result4 = self.install_python_package('cython')
+        else:
+            self.cmd_history(f"ls {cython}")
+            self.history_package_exists("cython", currentframe().f_lineno)
+            result4 = True
+        result5 = self.install_python_dev()
+        return result1 and result2 and result3 and result4 
 
     def start(self):
         self.allowInstallLocal(True).allowDisplayInfo(True).allowSelfInstall(True)
@@ -3982,5 +4111,5 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-15',majorVersion=1,minorVersion=15)
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-1-21',majorVersion=1,minorVersion=21)
     app.start()
