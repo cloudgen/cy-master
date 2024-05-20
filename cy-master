@@ -3797,6 +3797,11 @@ class CyMaster(AppBase):
             super().__init__(this)
         except:
             super(CyMaster, self).__init__(this)
+        Attr(self, 'configFile', '')
+        Attr(self, 'projectPath', '')
+        Attr(self, 'targetName', '')
+        Attr(self, 'buildFolder', '')
+        Attr(self, 'srcFolder', '')
 
     def check_setup_py(self, version):
         dir = '%s/%s' % (self.projectPath(), self.srcFolder())
@@ -3924,30 +3929,6 @@ class CyMaster(AppBase):
         self.prn("    2) compile static library (.so) ")
         return self.__ask_number__('    Which option 1 or 2 (type "exit" to exit)? ')
 
-    def configFile(self, configFile=None):
-        if configFile is not None:
-            self.__configFile__=configFile
-            return self
-        elif not hasattr(self,'__configFile__'):
-            self.__configFile__=''
-        return self.__configFile__
-
-    def projectPath(self, projectPath=None):
-        if projectPath is not None:
-            self.__projectPath__=projectPath
-            return self
-        elif not hasattr(self, '__projectPath__'):
-            self.__projectPath__=''
-        return self.__projectPath__
-
-    def targetName(self, targetName=None):
-        if targetName is not None:
-            self.__targetName__=targetName
-            return self
-        elif not hasattr(self, '__targetName__'):
-            self.__targetName__=''
-        return self.__targetName__
-
     def build_binary(self, version):
         c_folder = '%s/%s/c' % (self.projectPath(),self.buildFolder())
         if not self.pathexists(c_folder):
@@ -4068,22 +4049,6 @@ class CyMaster(AppBase):
             cmd="mv *.so build/lib/"
             self.shell(cmd)
 
-    def buildFolder(self, buildFolder=None):
-        if buildFolder is not None:
-            self.__buildFolder__=buildFolder
-            return self
-        elif not hasattr(self, '__buildFolder__'):
-            self.__buildFolder__=''
-        return self.__buildFolder__
-
-    def srcFolder(self, srcFolder=None):
-        if srcFolder is not None:
-            self.__srcFolder__=srcFolder
-            return self
-        elif not hasattr(self, '__srcFolder__'):
-            self.__srcFolder__=''
-        return self.__srcFolder__
-
     def checkConfig(self, display_list=False, ini_name='cy-master.ini'):
         if self.configFile() == '':
             self.findConfig(ini_name=ini_name)
@@ -4177,12 +4142,12 @@ class CyMaster(AppBase):
                                 if not result:
                                     self.prn(stdout)
                 self.cmd_history_print()
-                if targetSo == '':
-                    self.criticalMsg("Error in Compilation.","COMPILATION FAILED")
-                    return True
                 if mode == 1:
                     self.safeMsg("Compile into binary file!", "Build Success")
                 elif mode == 2:
+                    if targetSo == '':
+                        self.criticalMsg("Error in Compilation.","COMPILATION FAILED")
+                        return True
                     self.safeMsg("Compile into library file!", "Build Success")
         return True
 
@@ -4211,5 +4176,5 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-5-18',majorVersion=3,minorVersion=21)
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-5-20',majorVersion=5,minorVersion=20)
     app.start()
