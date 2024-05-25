@@ -4173,7 +4173,6 @@ class CyMaster(AppBase):
         if not self.parseArgs2():
             if not self.parseArgs(self.usage()):
                 self.msg_info()
-
 if __name__ == "__main__":
     app = CyMaster(__file__)
     app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-5-20',majorVersion=5,minorVersion=20)
