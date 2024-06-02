@@ -67,7 +67,7 @@ class Attr(object):
         'return', 'True', 'elif', 'in', 'try', 'and', 'else', 'is', 'while', 
         'as', 'except', 'lambda', 'with', 'assert', 'finally', 'nonlocal', 
         'yield', 'break', 'for', 'not', 'class', 'form', 'or', 'continue',
-        'global', 'pass', 'attrList']
+        'global', 'pass', 'attrList', 'hasattr']
 
     def lists(self,x=None):
         if x is None:
@@ -104,9 +104,10 @@ class Attr(object):
             if fromClass is not None:
                 if not hasattr(fromClass,"_"):
                     fromClass._={'attrList': [] }
-                    def attrList(self):
-                        return sorted(self._['attrList'])
-                    fromClass.__dict__['attrList'] = attrList.__get__(fromClass)
+                    if not hasattr(fromClass, "attrList"):
+                        def attrList(self):
+                            return sorted(self._['attrList'])
+                        fromClass.__dict__['attrList'] = attrList.__get__(fromClass)
                 if not hasattr(fromClass._, attrName):
                     fromClass._['attrList'].append( attrName )
                     if isinstance(value, list):
@@ -133,16 +134,6 @@ class Transition(object):
         Attr(self, attrName="toState", value = toState, readonly=True)
 
 class FiniteStateMachine(object):
-
-    def state(self, value=None):
-        if value is None:
-            return self._["state"]
-        elif self._["state"]=="":
-            self._["state"]= value
-        return self
-        
-    def nextState(self):
-        return self._["nextState"]
     
     def after(self, name, foo):
         name = name.strip()
@@ -181,7 +172,7 @@ class FiniteStateMachine(object):
     def transition(self, name, fromState, toState):
         if name not in self.transitions():
             def t(self):
-                if self._["state"] == fromState:
+                if self.state() == fromState:
                     before= "before%s" % name.capitalize()
                     next = True
                     if before in self.methods():
@@ -191,7 +182,7 @@ class FiniteStateMachine(object):
                         on= "on%s" % name.capitalize()
                         if on in self.methods():
                             self.__dict__[on]()
-                        self._["state"] = toState
+                        self._["state"]._["value"] = toState
                         self._["nextState"]=""
                         after= "after%s" % name.capitalize()
                         if after in self.methods():
@@ -204,17 +195,66 @@ class FiniteStateMachine(object):
         self.states(toState)
         return self
         
-    def __init__(self):
-        self._={"state": "", "nextState": ""}
-        Attr(self, attrName="methods", value = [])        
-        Attr(self, attrName="transitions", value = [])
-        Attr(self, attrName="states", value = [])
+    def __init__(self, fromClass=None):
+        if fromClass is None:
+            fromClass = self
+        Attr(fromClass, "state", readonly=True)
+        Attr(fromClass, "nextState", "", readonly=True)
+        Attr(fromClass, attrName="methods", value = [])
+        Attr(fromClass, attrName="transitions", value = [])
+        Attr(fromClass, attrName="states", value = [])
 
 class Reflection(object):
     def hasFunc(self, func):
         return hasattr(self, func) and callable(getattr(self, func))
 
-class Sh(object):
+class Signal(object):
+    def __init__(self):
+        self.__init_signal__()
+
+    def __init_signal__(self):
+        if not hasattr(self, '__signal_inited__'):
+            self.__signal_inited__=True
+            Attr(self, 'signal', 0)
+            self.errorState = FiniteStateMachine()
+            self.errorState.transition("hasError","normal","error") \
+                .transition("ignoreError","normal","errorIgnored") \
+                .transition("resetNormal","errorIgnored","normal") \
+                .state("normal")
+            signal.signal(signal.SIGINT, self.signal_handler)
+
+    def hasError(self):
+        self.errorState.hasError()
+        return self
+
+    def ignoreError(self):
+        self.errorState.ignoreError()
+        return self
+
+    def resetNormal(self):
+        self.errorState.resetNormal()
+        return self
+
+    def testIgnoredResetNormal(self):
+        state = self.errorState.state() 
+        self.errorState.resetNormal()
+        return state=="errorIgnored"
+
+    def signal_handler(self, sig, frame):
+        self.signal(sig)
+        if sig == 2:
+            self.prn('\nYou pressed Ctrl + c!\n')
+        if sig == 3:
+            self.prn('\nYou pressed Ctrl + Back Slash!')
+        exit()
+
+class Sh(Signal):
+
+    def __init__(self):
+        try:
+            super().__init__()
+        except:
+            super(Sh, self).__init__()
 
     def isGitBash(self):
         if not hasattr(self, '__is_gitbash__'):
@@ -341,6 +381,7 @@ class MsgBase(AppData, Sh):
             super().__init__(this)
         except:
             super(MsgBase, self).__init__(this)
+        self.__init_signal__()
         if not hasattr(self, "__msgbase_inited__"):
             self.__msgbase_inited__ = True
             Attr(self,"__colorMsgColor__", "")
@@ -354,6 +395,7 @@ class MsgBase(AppData, Sh):
             Attr(self,"__tagTerm__","")
             Attr(self,"__timeColor__","")
             Attr(self,"__timeTerm__","")
+            Attr(self,"useColor", not self.isGitBash())
 
     def __coloredMsg__(self,color=None):
         if color is None :
@@ -450,18 +492,6 @@ class MsgBase(AppData, Sh):
             .__tagMsg__(AppBase.LIGHT_GREEN,AppBase.LIGHT_TURQUOISE)
         self.prn("%s" % (self.__formattedMsg__()))
         return self
-
-    def useColor(self, color=None):
-        if color is not None:
-            self.__useColor__=color
-            return self
-        elif not hasattr(self, '__useColor__'):
-            if self.isGitBash():
-                # Gitbash cannot show color
-                self.__useColor__=False
-            else:
-                self.__useColor__=True
-        return self.__useColor__
 
 class CmdHistory(MsgBase):
 
@@ -811,6 +841,11 @@ class OS(AppHistory, Reflection):
     def is_debian(self):
         return self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian') or self.osVersion().startswith('Raspbian') or self.is_mint() or self.is_kali()
 
+    def is_docker_container(self):
+        if not hasattr(self, '__is_container__'):
+            self.__is_container__=self.pathexists('/.dockerenv')
+        return self.__is_container__
+
     def is_fedora(self):
         return self.osVersion().startswith('Amazon Linux') or self.osVersion().startswith('Fedora')
 
@@ -976,10 +1011,10 @@ class OS(AppHistory, Reflection):
             return True, stdout
 
     def uname_a(self, ignoreErr=True):
-        return self.uname('-a')
+        return self.uname('-a', ignoreErr=ignoreErr)
 
     def uname_m(self, ignoreErr=True):
-        return self.uname('-m')
+        return self.uname('-m', ignoreErr=ignoreErr)
 
 class AppMsg(OS):
 
@@ -1302,7 +1337,7 @@ class Shell(AppMsg):
             if cmd != "":
                 self.history_add_group(groupname, currentframe().f_lineno)
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
         else:
             self.history_group_exists(groupname, currentframe().f_lineno)
             self.msg_user_group_found(groupname)
@@ -1312,7 +1347,7 @@ class Shell(AppMsg):
         cmd= "id %s" % username
         self.history_check_user_exists(currentframe().f_lineno)
         self.cmd_history(cmd)
-        result, stdout = self.shell(cmd, ignoreErr=True)
+        result, stdout = self.ignoreError().shell(cmd)
         if stdout=="":
             cmd = ""
             if home is None:                    
@@ -1340,7 +1375,7 @@ class Shell(AppMsg):
             if cmd != "":
                 self.history_add_user(username, currentframe().f_lineno)
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
         else:
             self.history_user_exists(username, currentframe().f_lineno)
             self.msg_user_found(username)
@@ -1364,6 +1399,15 @@ class Shell(AppMsg):
                 self.shellCmd()
             self.__is_cmd__ = self.__shell_cmd__.split('\\')[-1] == 'cmd.exe' 
         return self.__is_cmd__
+
+    def is_gnu_tar(self):
+        result = False
+        tar = self.which_cmd("tar")
+        if tar != "":
+            result, stdout = self.shell([tar,"--version"])
+            if "GNU tar" in stdout:
+                result = True
+        return result
 
     def isLinuxShell(self):
         return self.shellCmd() == '/bin/bash' or self.shellCmd() == '/bin/zsh' or \
@@ -1468,7 +1512,7 @@ class Shell(AppMsg):
         cmd= "id %s" % username
         self.history_check_user_exists(currentframe().f_lineno)
         self.cmd_history(cmd)
-        result, stdout = self.shell(cmd, ignoreErr=True)
+        result, stdout = self.ignoreError().shell(cmd)
         if stdout!="":
             cmd = ""
             if self.is_alpine():
@@ -1483,12 +1527,14 @@ class Shell(AppMsg):
                     cmd = "userdel -r %s" % username
             self.history_remove_user(username,currentframe().f_lineno)
             self.cmd_history(cmd)
-            self.shell(cmd, ignoreErr=True)
+            self.ignoreError().shell(cmd)
 
     def shell(self, command='', ignoreErr=False, ignoreShell=False, ignoreAll=False):
         stderr = ''
         stdout = ''
         useWinpty = False
+        if ignoreErr:
+            self.ignoreError()
         if ignoreAll:
             pipe_array=[]
         elif ignoreShell:
@@ -1526,29 +1572,39 @@ class Shell(AppMsg):
                 for cmdlet in command:
                     pipe_array.append(cmdlet)
         else:
-            if ignoreErr:
+            if self.testIgnoredResetNormal():
                 return True, ""
             else:
+                self.hasError()
                 return False, "Wrong command data type."
         try:
             stdout,stderr = Popen(pipe_array,stdin=PIPE,stdout=PIPE,\
                 stderr=PIPE,universal_newlines=True).communicate('\n')
         except:
-            if ignoreErr:
-                return True
+            if self.testIgnoredResetNormal():
+                return True, ""
             else:
+                self.hasError()
                 return False
         try:
             if stderr.strip().lower() == 'stdin is not a tty' and useWinpty:
                 stdout,stderr = Popen(pipe_array[1:],stdin=PIPE,stdout=PIPE,\
                     stderr=PIPE,universal_newlines=True).communicate('\n')
-            if stderr != "" and not ignoreErr:
-                self.msg_error(command, stderr)
-                return False, stderr
-            else:
-                return True, stdout
+            if stderr != "":
+                if self.testIgnoredResetNormal():
+                    return True, stdout
+                else:
+                    self.hasError()
+                    self.msg_error(command, stderr)
+                    return False, stderr
         except:
-            return False, ""
+            if self.testIgnoredResetNormal():
+                return True, ""
+            else:
+                self.hasError()
+                return False, ""
+        self.resetNormal()
+        return True, stdout
 
     def ln(self, source="", target="", use_history=True, useSudo=False):
         if self.isCmd():
@@ -1640,7 +1696,7 @@ class Shell(AppMsg):
         else:
             cmd= [tar,"--owner=0", "--group=0", "--no-same-owner","--no-same-permissions","-cvf", fname, path]
         self.cmd_history(" ".join(cmd))
-        result, stdout = self.shell(cmd,ignoreErr=True,ignoreAll=True)
+        result, stdout = self.ignoreError().shell(cmd,ignoreAll=True)
 
     def tar_extract(self,fname):
         if self.isCmd() or self.isGitBash():
@@ -1651,7 +1707,7 @@ class Shell(AppMsg):
             fname = self.path_to_dos(fname)        
         cmd= [tar,"-xvf", fname]
         self.cmd_history(" ".join(cmd))
-        result, stdout = self.shell(cmd,ignoreErr=True,ignoreAll=True)
+        result, stdout = self.ignoreError().shell(cmd,ignoreAll=True)
 
     def which(self):
         if self.isCmd()  or self.isGitBash():
@@ -1683,14 +1739,14 @@ class Shell(AppMsg):
         if self.isCmd():
             return self.where_cmd(cmd)
         elif self.isGitBash():
-            result, stdout = self.shell(["/usr/bin/which", cmd], ignoreErr=True)
+            result, stdout = self.ignoreError().shell(["/usr/bin/which", cmd])
             return stdout.strip()
         elif self.isLinuxShell():
             if os.path.exists('/usr/bin/which'):
-                result, stdout = self.shell(["/usr/bin/which", cmd], ignoreErr=True)
+                result, stdout = self.ignoreError().shell(["/usr/bin/which", cmd])
                 return stdout.strip()
             elif os.path.exists('/bin/which'):
-                result, stdout = self.shell(["/usr/bin/which", cmd], ignoreErr=True)
+                result, stdout = self.ignoreError().shell(["/usr/bin/which", cmd])
                 return stdout.strip()
             elif os.path.exists('/bin/%s' % cmd):
                 return '/bin/%s' % cmd
@@ -1741,7 +1797,7 @@ class Shell(AppMsg):
                     cmd =  '%s\\%s' % (pathlet, original_cmd)
                     break
         if cmd==original_cmd and original_cmd != 'winpty.exe':
-            result, stdout = self.shell("where %s" % cmd, ignoreErr=True)
+            result, stdout = self.ignoreError().shell("where %s" % cmd)
             cmd == stdout.strip()
         if cmd==original_cmd:
             cmd=default
@@ -1794,7 +1850,7 @@ class Installer(Shell):
                 if python != "":
                     if self.isGitBash():
                         python = self.path_to_gitbash(python)
-                    result , stdout = self.shell([python,"--version"])
+                    result , stdout = self.ignoreError().shell([python,"--version"])
                     if result:
                         id_array = stdout.strip().split(' ')
                         if len(id_array) > 1:
@@ -1821,7 +1877,7 @@ class Installer(Shell):
                 self.py3Found( True )
                 self.cmd_history("  # python3 found: %s" % python3)
             if self.python2() != "":
-                result , stdout = self.shell("%s --version" % self.python2())
+                result , stdout = self.ignoreError().shell([self.python2(),"--version"])
                 if result:
                     id_array = stdout.strip().split(' ')
                     if len(id_array) > 1:
@@ -1831,7 +1887,7 @@ class Installer(Shell):
                         else:
                             self.cythonString("cpython-%s%s-%s-linux-gnu" % (version_array[0], version_array[1], arch))
             if self.python3() != "":
-                result , stdout = self.shell("%s --version" % self.python3())
+                result , stdout = self.ignoreError().shell([self.python3(), "--version"])
                 if result:
                     id_array = stdout.strip().split(' ')
                     if len(id_array) > 1:
@@ -1936,7 +1992,7 @@ class Installer(Shell):
                 else:
                     cmd = "apt install -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_alpine():
                 self.history_install_package(package, currentframe().f_lineno)
@@ -1945,7 +2001,7 @@ class Installer(Shell):
                 else:
                     cmd = "apk add %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_redhat():
                 if self.is_sudo():
@@ -1953,7 +2009,7 @@ class Installer(Shell):
                 else:
                     cmd = "yum install -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_fedora():
                 if self.is_sudo():
@@ -1961,7 +2017,7 @@ class Installer(Shell):
                 else:
                     cmd = "dnf install -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_opensuse():
                 if self.is_sudo():
@@ -1969,7 +2025,7 @@ class Installer(Shell):
                 else:
                     cmd = "zypper install -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             else:
                 self.cmd_history("  # Not compatible OS")
@@ -2035,7 +2091,7 @@ class Installer(Shell):
             else:
                 cmd = 'pip3 install --upgrade %s' % package
         self.cmd_history(cmd)
-        self.shell(cmd,ignoreErr=True)
+        self.ignoreError().shell(cmd)
 
     def install_runc(self):
         return self.install_package('runc', ['/usr/bin/runc'])
@@ -2190,7 +2246,7 @@ class Installer(Shell):
         if cmd != "":
             self.history_update_repository(currentframe().f_lineno)
             self.cmd_history(cmd)
-            self.shell(cmd, ignoreErr=True)
+            self.ignoreError().shell(cmd)
             self.__has_repository_updated__=True
             return True
         return False
@@ -2328,7 +2384,7 @@ class Installer(Shell):
                 else:
                     cmd =["apt", "purge", "--auto-remove", "-y", package]
                 self.cmd_history(" ".join(cmd))
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_alpine():
                 self.history_uninstall_package(package, currentframe().f_lineno)
@@ -2337,7 +2393,7 @@ class Installer(Shell):
                 else:
                     cmd = ["apk", "del", package]
                 self.cmd_history(" ".join(cmd))
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.osVersion().startswith('CentOS'):
                 if self.is_sudo():
@@ -2345,7 +2401,7 @@ class Installer(Shell):
                 else:
                     cmd = "yum remove -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             elif self.is_fedora():
                 if self.is_sudo():
@@ -2353,7 +2409,7 @@ class Installer(Shell):
                 else:
                     cmd = "dnf remove -y %s" % package
                 self.cmd_history(cmd)
-                self.shell(cmd, ignoreErr=True)
+                self.ignoreError().shell(cmd)
                 installed = True
             else:
                 self.msg_not_compatible_os()
@@ -2370,7 +2426,7 @@ class Installer(Shell):
         else:
             cmd = 'pip3 uninstall --break-system-packages %s' % package
         self.cmd_history(cmd)
-        self.shell(cmd,ignoreErr=True)
+        self.ignoreError().shell(cmd)
 
 class CheckSystem(Installer):
 
@@ -2610,21 +2666,6 @@ class Ask(AppData):
         if self.fromPipe():
             return None
         return 'yes' == self.__ask_yesno__('Do you want to update the latest (%s) from internet? (yes/no) ' % self.latest_version())
-
-    def signal(self, signal=None):
-        if signal is not None:
-            self.__signal__=signal
-            return self
-        elif not hasattr(self, '__signal__'):
-            self.__signal__=0
-        return self.__signal__
-
-    def signal_handler(self, sig, frame):
-        self.signal(sig)
-        if sig == 2:
-            self.prn('\nYou pressed Ctrl+C!\n')
-        if sig == 3:
-            self.prn('\nYou pressed Ctrl+Back Slash!')
 
 class ShellProfile(Shell):
 
@@ -2895,7 +2936,7 @@ class Temp(AppHistory):
             return folder
 
 class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
-    VERSION="1.14"
+    VERSION="1.15"
 
     def __init__(self, this = None):
         try:
@@ -2909,11 +2950,12 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
         Attr(self, "subCmd", ["check-system","check-update","check-version","cython-string","download",
             "download-app","download-target-app","global-installation-path","help","install",
             "local-installation-path","this","this-file","timestamp","today","update","where","which"])
+        # self.__init_docker_build__() ## should be called in self.setInstallation()
 
     def __alpine_ask_install_sudo__(self):
         if self.ask_install_sudo():
-            cmd="apk add sudo"
-            self.cmd_history(cmd)
+            cmd=['apk', 'add', 'sudo']
+            self.cmd_history(' '.join(cmd))
             result, stdout = self.shell(cmd, True)
             cmd="echo '%wheel ALL=(ALL) ALL' > /etc/sudoers.d/wheel"
             self.cmd_history(cmd)
@@ -3191,7 +3233,7 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
             cmd="sudo %s %s" % (self.executable(),self.tempFile())
         self.cmd_history("# ** install pip by get-pip.py **", currentframe().f_lineno)
         self.cmd_history(cmd)
-        self.shell(cmd,ignoreErr=True)
+        self.ignoreError().shell(cmd)
 
     def download_and_install_target(self):
         tempFolder = self.tempFolder()
@@ -3278,20 +3320,6 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
 
     def hasGlobalInstallation(self):
         return  self.pathexists(self.globalInstallPath(0)) or self.pathexists(self.globalInstallPath(1)) 
-
-    def is_docker_container(self):
-        if not hasattr(self, '__is_container__'):
-            self.__is_container__=self.pathexists('/.dockerenv')
-        return self.__is_container__
-
-    def is_gnu_tar(self):
-        result = False
-        tar = self.which_cmd("tar")
-        if tar != "":
-            result, stdout = self.shell("%s --version" % tar)
-            if "GNU tar" in stdout:
-                result = True
-        return result
 
     def isGlobal(self):
         if not hasattr(self,'__is_global__'):
@@ -3415,7 +3443,7 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
                     self.help()
                     return True
                 elif self.cmd()== "where" and len(sys.argv) > 2:
-                    self.cmd_history("# ** where %s **" % sys.argv[2],currentframe().f_lineno)
+                    self.cmd_history("# ** where %s **" % sys.argv[2],currentframe().f_lineno)    
                     self.cmd_history_print(currentframe().f_lineno)
                     self.prn(self.where_cmd(sys.argv[2]))
                     return True
@@ -3426,7 +3454,8 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
                     return True
                 elif self.cmd() == "self-install" or self.cmd() == "install" or self.cmd() == "update":
                     self.start_install()
-                    self.cmd_history_print()
+                    if self.errorState.state == "error":
+                        self.cmd_history_print()
                     return True
                 elif self.cmd() == "cython-string":
                     self.prn(self.cythonString()) 
@@ -3466,7 +3495,8 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
                     return True
                 elif self.cmd() == "uninstall":
                     self.selfUninstall(verbal=True)
-                    self.cmd_history_print()
+                    if self.errorState.state == "error":
+                        self.cmd_history_print()
                     return True
                 elif self.cmd() == "check-update" or self.cmd() == "check-version"  or self.cmd() == "check":
                     self.check_update()
@@ -3626,7 +3656,8 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
                     result = True
             if result:
                 if verbal:
-                    self.cmd_history_print(currentframe().f_lineno)
+                    if self.errorState.state == "error":
+                        self.cmd_history_print(currentframe().f_lineno)
                     self.msg_unintall_global()
             else:
                 self.msg_global_failed()
@@ -3657,7 +3688,8 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
                 if self.targetApp() != '':
                     self.removeFile(self.localTargetInstallPath())
                 if verbal:
-                    self.cmd_history_print(currentframe().f_lineno)
+                    if self.errorState.state == "error":
+                        self.cmd_history_print(currentframe().f_lineno)
                     self.msg_uninstall_local()
                 return True
             else:
@@ -3668,7 +3700,6 @@ class AppBase(AppPara, ShellProfile, Curl, Temp, Ask):
             return False
 
     def setInstallation(self,appName='',author='',lastUpdate='',homepage='',downloadUrl="",majorVersion=0,minorVersion=0):
-        signal.signal(signal.SIGINT, self.signal_handler)
         self.check_system() \
             .author( author ) \
             .appName( appName ) \
@@ -4176,5 +4207,5 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-5-20',majorVersion=5,minorVersion=20)
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-6-02',majorVersion=6,minorVersion=2)
     app.start()
