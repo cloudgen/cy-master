@@ -4207,5 +4207,7 @@ class CyMaster(AppBase):
 
 if __name__ == "__main__":
     app = CyMaster(__file__)
-    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-6-02',majorVersion=6,minorVersion=2)
     app.start()
+    app.setInstallation(appName='cy-master',author='Cloudgen Wong',homepage="https://github.com/cloudgen/cy-master",downloadUrl="https://dl.leolio.page/cy-master",lastUpdate='2024-5-20',majorVersion=5,minorVersion=20)
+    app.start()
+
